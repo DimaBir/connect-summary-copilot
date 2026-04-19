@@ -1,0 +1,12 @@
+{
+  "name": "connect-summary-copilot",
+  "description": "Generate a performance review summary from your Azure DevOps contributions (PRs created, PRs reviewed, completed work items). Auto-detects available ADO tools (MCP, az CLI, REST, or manual paste).",
+  "version": "0.1.0",
+  "author": {
+    "name": "DimaBir"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/DimaBir/connect-summary-copilot",
+  "keywords": ["performance-review", "azure-devops", "ado", "copilot-skill"],
+  "skills": "connect-summary/skills/"
+}
