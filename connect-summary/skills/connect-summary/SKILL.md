@@ -1,6 +1,6 @@
 ---
 name: connect-summary
-description: "Generate a Connect performance review summary from your Microsoft Azure DevOps contributions (PRs created, PRs reviewed, completed work items). Hardcoded for Microsoft org (dev.azure.com/microsoft). Uses Entra ID via Azure CLI for auth — no PAT required."
+description: "Generate a Connect performance review summary from your Microsoft Azure DevOps contributions (PRs created, PRs reviewed, completed work items). Hardcoded for Microsoft org (dev.azure.com/microsoft). Uses Entra ID via Azure CLI as the primary auth path, with PAT fallback."
 ---
 
 # Connect Performance Review Summary Generator (Microsoft)
@@ -63,9 +63,11 @@ $headers = @{
     Authorization = "Bearer $token"
     Accept        = "application/json"
 }
-$org     = "microsoft"
-$project = "{project}"          # from user input
-$since   = "{since_date}"       # from user input, YYYY-MM-DD
+$org      = "microsoft"
+$project  = "{project}"          # from user input
+$since    = "{since_date}"       # from user input, YYYY-MM-DD
+$sinceIso = ([DateTime]$since).ToUniversalTime().ToString("o")
+$nowIso   = (Get-Date).ToUniversalTime().ToString("o")
 ```
 
 > 🔄 **PAT fallback:** If `az` is unavailable, use a PAT instead — see "Fallback: PAT" at the end. The only line that changes is `$headers`; everything below is identical.
@@ -87,17 +89,18 @@ PRs are repo-scoped. List repos, then page through each.
 ```powershell
 $repos = (Invoke-RestMethod -Uri "https://dev.azure.com/$org/$project/_apis/git/repositories?api-version=7.1" -Headers $headers).value
 
+# Server-side time filter via queryTimeRangeType=closed + minTime/maxTime ⇒ ADO returns only PRs closed in [since, now].
 $allCreated = @()
 foreach ($repo in $repos) {
     $skip = 0
     do {
-        $uri  = "https://dev.azure.com/$org/$project/_apis/git/repositories/$($repo.id)/pullrequests?searchCriteria.status=completed&searchCriteria.creatorId=$userId&`$top=100&`$skip=$skip&api-version=7.1"
+        $uri  = "https://dev.azure.com/$org/$project/_apis/git/repositories/$($repo.id)/pullrequests?searchCriteria.status=completed&searchCriteria.creatorId=$userId&searchCriteria.minTime=$sinceIso&searchCriteria.maxTime=$nowIso&searchCriteria.queryTimeRangeType=closed&`$top=100&`$skip=$skip&api-version=7.1"
         $page = (Invoke-RestMethod -Uri $uri -Headers $headers).value
         $allCreated += $page
         $skip += 100
     } while ($page.Count -eq 100)
 }
-$createdPRs = $allCreated | Where-Object { $_.closedDate -ge $since }
+$createdPRs = $allCreated
 ```
 
 Collect per PR: `title`, `pullRequestId`, `repository.name`, URL `https://dev.azure.com/$org/$project/_git/<repo>/pullrequest/<id>`.
@@ -111,26 +114,29 @@ $allReviewed = @()
 foreach ($repo in $repos) {
     $skip = 0
     do {
-        $uri  = "https://dev.azure.com/$org/$project/_apis/git/repositories/$($repo.id)/pullrequests?searchCriteria.status=completed&searchCriteria.reviewerId=$userId&`$top=100&`$skip=$skip&api-version=7.1"
+        $uri  = "https://dev.azure.com/$org/$project/_apis/git/repositories/$($repo.id)/pullrequests?searchCriteria.status=completed&searchCriteria.reviewerId=$userId&searchCriteria.minTime=$sinceIso&searchCriteria.maxTime=$nowIso&searchCriteria.queryTimeRangeType=closed&`$top=100&`$skip=$skip&api-version=7.1"
         $page = (Invoke-RestMethod -Uri $uri -Headers $headers).value
         $allReviewed += $page
         $skip += 100
     } while ($page.Count -eq 100)
 }
-$reviewedPRs = $allReviewed | Where-Object {
-    $_.closedDate -ge $since -and $_.createdBy.id -ne $userId    # exclude own PRs
-}
+$reviewedPRs = $allReviewed | Where-Object { $_.createdBy.id -ne $userId }   # exclude own PRs
 ```
 
 ### Step 4 — Completed Work Items (WIQL)
 
+# Captures items the user owned (AssignedTo = @Me) that landed in a terminal state
+# during the review window. ClosedDate is set on most Microsoft process templates
+# (Agile, Scrum, CMMI). ChangedDate is included as a guard for templates that don't
+# populate ClosedDate. This is the standard "what I shipped" view used for Connect.
 ```powershell
 $wiql = @"
 SELECT [System.Id] FROM WorkItems
 WHERE [System.AssignedTo] = @Me
   AND [System.State] IN ('Closed','Completed','Resolved','Done')
-  AND [Microsoft.VSTS.Common.ClosedDate] >= '$since'
-ORDER BY [Microsoft.VSTS.Common.ClosedDate] DESC
+  AND ( [Microsoft.VSTS.Common.ClosedDate] >= '$since'
+        OR [System.ChangedDate]            >= '$since' )
+ORDER BY [System.ChangedDate] DESC
 "@
 $body = @{ query = $wiql } | ConvertTo-Json
 $ids  = (Invoke-RestMethod -Method POST -Uri "https://dev.azure.com/$org/$project/_apis/wit/wiql?api-version=7.1" -Headers $headers -ContentType "application/json" -Body $body).workItems.id

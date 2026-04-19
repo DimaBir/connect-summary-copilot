@@ -2,7 +2,7 @@
 
 A GitHub Copilot CLI skill that drafts your **Connect** performance review by pulling your PRs and work items from Microsoft's internal Azure DevOps (`dev.azure.com/microsoft`).
 
-It is **hardcoded to the `microsoft` ADO org** — you only need to pass `since_date` and `project`. Auth uses your **Entra ID** via Azure CLI — no PAT required.
+It is **hardcoded to the `microsoft` ADO org** — you only need to pass `since_date` and `project`. Auth uses your **Entra ID** via Azure CLI as the primary path, with a **PAT fallback** for environments where `az` cannot be used.
 
 ## What it does
 
@@ -21,19 +21,19 @@ Given a start date and a project, the skill queries ADO for:
 
 You need [GitHub Copilot CLI](https://github.com/github/copilot-cli) installed.
 
-1. Copy `SKILL.md` into your Copilot skills folder:
+1. From the repo root (the `playground` clone), copy `SKILL.md` into your Copilot skills folder:
 
    **Windows (PowerShell):**
    ```powershell
    $dest = "$env:USERPROFILE\.copilot\skills\connect-summary"
    New-Item -ItemType Directory -Force -Path $dest | Out-Null
-   Copy-Item .\SKILL.md $dest\SKILL.md -Force
+   Copy-Item .\plugins\connect-summary\skills\connect-summary\SKILL.md $dest\SKILL.md -Force
    ```
 
    **macOS / Linux:**
    ```bash
    mkdir -p ~/.copilot/skills/connect-summary
-   cp ./SKILL.md ~/.copilot/skills/connect-summary/SKILL.md
+   cp ./plugins/connect-summary/skills/connect-summary/SKILL.md ~/.copilot/skills/connect-summary/SKILL.md
    ```
 
 2. Restart Copilot CLI (`copilot`) so the skill is picked up.
@@ -127,9 +127,12 @@ You'll get a Markdown document with three sections:
 ## Files
 
 ```
-connect-summary-share/
-├── SKILL.md    # The skill itself — copy to ~/.copilot/skills/connect-summary/
-└── README.md   # This file
+plugins/
+└── connect-summary/
+    └── skills/
+        └── connect-summary/
+            ├── SKILL.md    # The skill itself — copy to ~/.copilot/skills/connect-summary/
+            └── README.md   # This file
 ```
 
 ---
