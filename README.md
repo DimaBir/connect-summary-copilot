@@ -1,82 +1,139 @@
-# connect-summary-copilot
+# Connect Summary Skill (Microsoft)
 
-A distributable GitHub Copilot CLI plugin that generates a structured **performance-review summary** from your Azure DevOps contributions — PRs created, PRs reviewed, and completed work items — with zero dependency on Azure OpenAI. The Copilot model itself writes the summary.
+A GitHub Copilot CLI skill that drafts your **Connect** performance review by pulling your PRs and work items from Microsoft's internal Azure DevOps (`dev.azure.com/microsoft`).
+
+It is **hardcoded to the `microsoft` ADO org** — you only need to pass `since_date` and `project`. Auth uses your **Entra ID** via Azure CLI — no PAT required.
 
 ## What it does
 
-When you invoke `/connect-summary since YYYY-MM-DD`, the skill:
+Given a start date and a project, the skill queries ADO for:
+- PRs you **created** (completed, since date)
+- PRs you **reviewed** (completed, since date — excluding your own)
+- Work items **assigned to you** that were closed/completed/resolved/done since the date
 
-1. Auto-detects which Azure DevOps access method is available in your environment (ADO MCP tools → `az` CLI → bearer-token REST → PAT REST → manual paste).
-2. Fetches completed PRs you authored, PRs you reviewed, and closed work items assigned to you since the given date.
-3. Generates a structured markdown summary with three sections: **Impact Delivered**, **Learnings & Growth**, **Collaboration & Future Goals** — with clickable links for every PR and work item ID.
-4. Has strict anti-fabrication rules: never invents metrics, stops to ask if titles are too vague to infer impact.
+…and then generates a structured Connect summary (Impact / Learnings / Collaboration) grouped into themes, with a clickable-links appendix of every PR and work item.
 
-## Included skills
+**It never fabricates metrics** — if titles are vague it will ask you for 2–3 impact bullets in your own words.
 
-| Skill | Description |
-|-------|-------------|
-| `connect-summary` | Generate a Connect performance review summary from ADO contributions |
-
-## Requirements
-
-- **Azure DevOps access** via any one of:
-  - ADO MCP server configured in Copilot CLI (best), or
-  - `az` CLI with `az login` (bearer-token REST fallback works even when `az boards` keyring is broken), or
-  - A Personal Access Token exported as `$env:ADO_PAT` (scopes: Code Read + Work Items Read), or
-  - Manual paste of PR / work-item URLs.
-- **Org and project** are **required** — pass them with every invocation (e.g. `org myorg project MyProject`). If your project uses the **Basic** process template, see the note in `SKILL.md` about substituting `System.ChangedDate` for `Microsoft.VSTS.Common.ClosedDate` in the WIQL.
+---
 
 ## Install
 
-Install directly from GitHub (public repo — no auth or collaborator access required):
+You need [GitHub Copilot CLI](https://github.com/github/copilot-cli) installed.
 
-```bash
-copilot plugin install DimaBir/connect-summary-copilot
-```
+1. Copy `SKILL.md` into your Copilot skills folder:
 
-> **Hit `EBUSY: resource busy or locked` on install/update?** Another Copilot CLI session or file-indexer is holding the marketplace cache dir open. Fix:
-> ```powershell
-> # Close all other `copilot` sessions first, then:
-> Remove-Item -Recurse -Force "$env:LOCALAPPDATA\copilot\marketplaces\DimaBir--connect-summary-copilot"
-> copilot plugin install DimaBir/connect-summary-copilot
-> ```
+   **Windows (PowerShell):**
+   ```powershell
+   $dest = "$env:USERPROFILE\.copilot\skills\connect-summary"
+   New-Item -ItemType Directory -Force -Path $dest | Out-Null
+   Copy-Item .\SKILL.md $dest\SKILL.md -Force
+   ```
 
-Verify it loaded:
+   **macOS / Linux:**
+   ```bash
+   mkdir -p ~/.copilot/skills/connect-summary
+   cp ./SKILL.md ~/.copilot/skills/connect-summary/SKILL.md
+   ```
 
-```bash
-copilot plugin list
-```
+2. Restart Copilot CLI (`copilot`) so the skill is picked up.
 
-You should see `connect-summary-copilot` with the `connect-summary` skill.
+That's it — no plugin install, no marketplace.
 
-### Updating
+---
 
-```bash
-copilot plugin update connect-summary-copilot
-```
+## One-time setup: `az login`
 
-### Uninstalling
+The skill authenticates to Microsoft ADO using your **Entra ID** token via Azure CLI. No PAT, no secret on disk.
 
-```bash
-copilot plugin uninstall connect-summary-copilot
-```
+1. Install Azure CLI if you don't have it: <https://learn.microsoft.com/cli/azure/install-azure-cli>
+2. Sign in with your Microsoft corp account:
+   ```powershell
+   az login
+   ```
+   A browser opens — sign in as `you@microsoft.com`.
+3. Verify:
+   ```powershell
+   az account show --query user.name
+   # → you@microsoft.com
+   ```
 
-### Local / dev install
+That's it. Tokens are short-lived (~1 hour) and refreshed automatically — there's nothing to manage or revoke.
 
-Clone anywhere and point Copilot at it:
+> 🔒 **Security note:** Auth is tied to your corp account. Conditional Access, MFA, and account-disable apply automatically. Nothing sensitive is stored on disk.
 
-```bash
-git clone https://github.com/DimaBir/connect-summary-copilot.git
-copilot --plugin-dir ./connect-summary-copilot
-```
+### Fallback: PAT (only if you can't use `az`)
+
+If you're in an environment where Azure CLI isn't available, you can fall back to a PAT — see the **"Fallback: PAT"** section at the bottom of `SKILL.md`.
+
+---
 
 ## Usage
 
+In Copilot CLI:
+
 ```
-/connect-summary since 2026-03-01 org myorg project MyProduct
-/connect-summary since 2025-07-01 org contoso project Platform
+/connect-summary since 2026-01-01 project WDATP
 ```
 
-## License / Attribution
+Other examples:
 
-Personal-use plugin. Contains no secrets or PII. Pass your own `org` and `project` on every call.
+```
+Generate my Connect summary since March 2026, project OS
+Connect summary for the last 6 months, project Edge
+```
+
+The skill will:
+1. Acquire an Entra ID token (`az account get-access-token`).
+2. Resolve your ADO identity.
+3. Page through repos and collect PRs + work items.
+4. Show you the counts, then generate the summary.
+
+---
+
+## Output
+
+You'll get a Markdown document with three sections:
+- 🏆 **Impact Delivered** — 2–4 themes grouped from your PRs/work items
+- 💡 **Learnings & Growth**
+- 🤝 **Collaboration & Future Goals**
+
+…followed by an **Appendix** with every PR and work item as a clickable link, so you can verify and edit.
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Could not get Entra ID token` | Run `az login` and try again. |
+| `az: command not found` | Install Azure CLI, or use the PAT fallback in `SKILL.md`. |
+| `authenticatedUser.id` is empty | Token is invalid — `az logout` then `az login` again. |
+| 401 mid-run | Token expired — re-run `az account get-access-token`. |
+| 404 on `/_apis/projects/…` | Check the project name spelling. Must match exactly (e.g., `WDATP`, `OS`, `Edge`). |
+| HTTP 429 | Rate-limited — wait a minute and retry. |
+
+---
+
+## What it does NOT do
+
+- ❌ Does not post anything back to ADO.
+- ❌ Does not read comments, commits, or wiki pages.
+- ❌ Does not fabricate numbers or claims — if your titles are vague it will ask you for context.
+- ❌ Does not support non-Microsoft ADO orgs (hardcoded to `microsoft` — fork and change the `$org` line if you need to).
+
+---
+
+## Files
+
+```
+connect-summary-share/
+├── SKILL.md    # The skill itself — copy to ~/.copilot/skills/connect-summary/
+└── README.md   # This file
+```
+
+---
+
+## License
+
+Share freely within Microsoft. No warranty.
